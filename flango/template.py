@@ -1,4 +1,79 @@
 # coding: utf-8
+"""
+    flango.template
+    ~~~~~~~~~~~~~~
+
+    template module provide a simple template system that compiles
+    templates to Python code which like django and tornado template
+    modules.
+
+    Usage
+    -----
+
+    Well, you can view the tests file directly for the usage under tests.
+
+    Basically::
+
+            >>> from flango import template
+            >>> template.Template('Hello, {{ name }}').render(name = 'flango')
+            Hello, flango
+
+    If, else, for...::
+
+            >>> template.Template('''
+            ... {% for i in l %}
+            ...    {% if i > 3 %}
+            ...    	{{ i }}
+            ...    {% else %}
+            ... 	less than 3
+            ...    {% endif %}
+            ... {% endfor %})
+            ... ''' ).render(l = [2, 4])
+            less than 3
+            4
+
+    Then, user define class object maybe also works well::
+
+            >>> class A(object):
+            ...
+            ...    def __init__(self, a, b):
+            ...        self.a = a
+            ...        self.b = b
+            ...
+            >>> o = A("I am o.a", [1, 2, 3])
+            >>> template.Template('''
+            ...    {{ o.a }}
+            ...    {% for i in o.b %}
+            ...    	{{ i }}
+            ...    {% endfor %}
+            ... ''').render(o=o)
+            I am o.a
+            1
+            2
+            3
+
+    and Wow, function maybe suprise you::
+
+            >>> template.Template('{{ abs(-3) }}').render()
+            '3'
+            >>> template.Template('{{ len([1, 2, 3]) }}').render()
+            '3'
+            >>> template.Template('{{ [1, 2, 3].index(2) }}').render()
+            '1'
+
+    and complex function like lambda expression maybe works::
+
+            >>> template.Template('{{ list(map(lambda x: x * 2, [1, 2, 3])) }}').render()
+            '[2, 4, 6]'
+
+    and lastly, inheritance of template, extends and include::
+
+            {% extends 'base.html' %}
+            {% include 'included.html' %}
+
+    Hacking with fun and joy.
+
+"""
 import re
 import os
 import collections
@@ -21,7 +96,7 @@ class Scanner(object):
             |  # or
             {%\s*(?P<statement>(?P<keyword>\w+)\s*(.+?))\s*%}  # statement: {% for i in range(10) %}
             ''', re.VERBOSE)
-        # the pre-text before pattern.
+        # the pre-text before token.
         self.pretext = ''
         # the remaining text which have not been processed.
         self.remain = source
@@ -88,8 +163,8 @@ class Template(object):
 
     A initialized template instance will parse and compile
     all the template source to Python intermediate code,
-    and instance function 'render' will use Python builtin function
-    'exec' to execute the intermediate code in Python
+    and instance function `render` will use Python builtin function
+    `exec` to execute the intermediate code in Python
     runtime.
 
     As function `exec` own very strong power and the ability to
@@ -99,7 +174,7 @@ class Template(object):
     `exec` also has a huge problem in security, so be careful
     and be serious, and I am very serious too.
     """
-    def __init__(self, source, path='', is_escape=True):
+    def __init__(self, source, path='', autoescape=True):
         if not source:
             raise ValueError('Invalid parameter')
 
@@ -109,7 +184,7 @@ class Template(object):
         self.nodes = []
         # parent template
         self.parent = None
-        self.escape = is_escape
+        self.autoescape = autoescape
 
         self._parse()
         # compiled intermediate code.
@@ -134,7 +209,7 @@ class Template(object):
 
             variable, endtag, tag, statement, keyword, suffix = token.groups()
             if variable:
-                node_text = 'escape(str({0}))'.format(variable) if self.escape else variable
+                node_text = 'escape(str({0}))'.format(variable) if self.autoescape else variable
                 self.nodes.append(VariableNode(node_text, indent, block_stack_top()))
             elif endtag:
                 if tag != 'block':
@@ -199,11 +274,13 @@ class Template(object):
         return compile(generate_code, '<string>', 'exec')
 
     def render(self, **context):
-        context['_stdout'] = []
-        context['escape'] = escape
+        # `context['_stdout']`: Compiled template source code
+        # which is a Python list, contain all the output
+        # statement of Python code.
+        context.update({'_stdout': [], 'escape': escape})
 
         exec(self.intermediate, context)
-        return ''.join(map(str, context['_stdout']))
+        return re.sub(r'(\s+\n)+', r'\n', ''.join(map(str, context['_stdout'])))
 
 
 class LRUCache(object):
@@ -273,58 +350,3 @@ def escape(content):
     """ Escapes a string's HTML. """
     return content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')\
         .replace('"', '&quot;').replace("'", '&#039;')
-
-
-if __name__ == '__main__':
-    table = [dict(a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8, i=9, j=10)]
-
-    # t = """
-    #     <table>
-    #     {% for row in table %}
-    #     <tr>{% for col in row.values() %}
-    #         <td>{{ col }}<td/>
-    #         {% endfor %}
-    #     </tr>{% endfor %}
-    #     </table>"""
-    #
-    # s = Template(t)
-    # r = s.render(col='hello', table=table)
-
-    t2 = """
-        <table>
-        <tr>{% for v in table[0].values() %}
-            {% if v % 2 %}
-            <td>{{ col }}<td/>
-            {% else %}
-            <td>{{ col + str(v) }}<td/>
-            {%endif%}
-            {% endfor %}
-        </tr>
-        </table>"""
-
-    s = Template(t2)
-    r = s.render(col='hello', table=table)
-    print r
-
-    # lunar_tmpl = Template('test_extends.html').render()
-    # lunar_tmpl = Loader().load('snippet.html').render()
-
-    # print lunar_tmpl
-
-
-    # from django.conf import settings
-    # settings.configure()
-    # from django.template import Context as DjangoContext
-    # from django.template import Template as DjangoTemplate
-    # django_tmpl = DjangoTemplate(
-    #     """
-    #     <table>
-    #     {% for row in table %}
-    #     <tr>
-    #         <td>{{ col }}<td/>
-    #     </tr>{% endfor %}
-    #     </table>"""
-    # )
-    #
-    # context = DjangoContext({'col': 'hello', 'table': table})
-    # print django_tmpl.render(context)
