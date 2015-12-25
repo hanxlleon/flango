@@ -15,7 +15,7 @@
     Basically::
 
             >>> from flango import template
-            >>> template.Template('Hello, {{ name }}').render(name = 'flango')
+            >>> template.Template('Hello, {{ name }}').render(name='flango')
             Hello, flango
 
     If, else, for...::
@@ -28,7 +28,7 @@
             ... 	less than 3
             ...    {% endif %}
             ... {% endfor %})
-            ... ''' ).render(l = [2, 4])
+            ... ''' ).render(l=[2, 4])
             less than 3
             4
 
