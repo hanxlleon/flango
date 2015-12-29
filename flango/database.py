@@ -197,7 +197,7 @@ class Sqlite(threading.local):
 
     def create_table(self, model):
         table_name = model.tablename
-        create_sql = ', '.join(field.sql for field in model.fields.values())
+        create_sql = ', '.join(field.create_sql() for field in model.fields.values())
 
         cursor = self.conn.cursor()
         cursor.execute('create table {0} ({1});'.format(table_name, create_sql))
@@ -237,25 +237,16 @@ class SelectQuery(object):
     """
 
     def __init__(self, model, *args):
-        self.base_statement = 'select {columns} from {tablename};'
+        self.base_sql = 'select {columns} from {tablename};'
         self.model = model
         self.query = list(*args) if args != ((),) else ['*']
 
     @property
     def sql(self):
-        return self.base_statement.format(
+        return self.base_sql.format(
             columns=', '.join([str(column) for column in self.query]),
             tablename=self.model.tablename
         )
-
-    def _make_instance(self, descriptor, record):
-        # must handle empty case.
-        try:
-            instance = self.model(**dict(zip(descriptor, record)))
-        except TypeError:
-            return None
-
-        return instance
 
     def all(self):
         return self._execute(self.sql)
@@ -264,13 +255,40 @@ class SelectQuery(object):
         sql = '{0} limit 1;'.format(self.sql.rstrip(';'))
         return self._execute(sql)[0]
 
-    def where(self, **kwargs):
+    def where(self, *args, **kwargs):
         where_list = []
         for k, v in kwargs.iteritems():
             where_list.append('{0}="{1}"'.format(k, str(v)))
+        where_list.extend(list(args))
 
         sql = '{0} where {1};'.format(self.sql.rstrip(';'), ' and '.join(where_list))
         return self._execute(sql)
+
+    def _base_function(self, func):
+        columns = ', '.join([str(column) for column in self.query])
+        sql = self.base_sql.format(
+                  columns='{0}({1})'.format(func, columns),
+                  tablename=self.model.tablename
+              )
+        cursor = self.model.db.execute(sql)
+        record = cursor.fetchone()
+        return record[0]
+
+    def count(self):
+        return self._base_function('count')
+
+    def max(self):
+        """Person.select('id').max()"""
+        return self._base_function('max')
+
+    def min(self):
+        return self._base_function('min')
+
+    def avg(self):
+        return self._base_function('avg')
+
+    def sum(self):
+        return self._base_function('sum')
 
     def _execute(self, sql):
         cursor = self.model.db.execute(sql)
@@ -278,6 +296,14 @@ class SelectQuery(object):
         records = cursor.fetchall()
         query_set = [self._make_instance(descriptor, record) for record in records]
         return query_set
+
+    def _make_instance(self, descriptor, record):
+        # must handle empty case.
+        try:
+            instance = self.model(**dict(zip(descriptor, record)))
+        except TypeError:
+            return None
+        return instance
 
 
 if __name__ == '__main__':
@@ -292,17 +318,20 @@ if __name__ == '__main__':
         class Meta:
             db_table = 'test'
 
-    p = Person()
-    # db.create_table(p)
-    p.age = 12
-    p.name = 'test'
-    p.create_time = datetime.now()
+    # p = Person()
+    # # db.create_table(p)
+    # p.age = 12
+    # p.name = 'test'
+    # p.create_time = datetime.now()
     # p.save()
     # p2 = Person.get(id=1, name='test')
     # p = Person.select('id', 'name')
     # db.drop_table(p)
     # p = Person.select('id', 'name').first()
-    p = Person.select().where(id=1)[0]
-    print p.id, p.name
+    # p = Person.select().where(id=1)[0]
+    # p = Person.select().where('id<3', name='test')
+    p = Person.select('name').max()
+    print p
+    # print p.id, p.name
     pass
 
