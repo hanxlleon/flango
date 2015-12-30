@@ -3,16 +3,20 @@ from datetime import datetime
 
 from flango import database
 
-from models import Author, Post, Tag
-
 
 db = database.Sqlite('flango.db')
+from models import Author, Post, Tag, Post_Tag_Relate
+
+
+
 
 
 class BaseTests(unittest.TestCase):
     def setUp(self):
         db.create_table(Author)
         db.create_table(Post)
+        db.create_table(Tag)
+        db.create_table(Post_Tag_Relate)
 
         for i in range(1, 6):
             db.execute('insert into {tablename}({columns}) values({items});'.format(
@@ -25,10 +29,17 @@ class BaseTests(unittest.TestCase):
                 columns='title, content, author_id',
                 items='"test title {0}", "test content {0}", {0}'.format(str(i))
             ))
+            db.execute('insert into {tablename}({columns}) values({items});'.format(
+                tablename='tag',
+                columns='name',
+                items='"test tag {0}"'.format(str(i))
+            ))
 
     def tearDown(self):
         db.drop_table(Author)
         db.drop_table(Post)
+        db.drop_table(Tag)
+        db.drop_table(Post_Tag_Relate)
 
     def test_create_table(self):
         pass
@@ -52,6 +63,8 @@ class BaseTests(unittest.TestCase):
         init_dict = {
             'author': Author,
             'my_post': Post,
+            'tag': Tag,
+            'post_tag_relate': Post_Tag_Relate,
         }
 
         self.assertEqual(init_dict, db.tables)
@@ -136,8 +149,8 @@ class ManytoManyFieldsTest(BaseTests):
         p = Post.get(id=1)
         t1 = Tag.get(id=1)
         t2 = Tag.get(id=2)
-        p.tags.append(t1)
-        p.tags.append(t2)
+        p.tags.add(t1)
+        p.tags.add(t2)
         self.assertEqual([p.id for p in p.tags.all()], [t1.id, t2.id])
         self.assertEqual([p.id for p in t1.posts.all()], [p.id])
         self.assertEqual([p.id for p in t2.posts.all()], [p.id])
@@ -146,18 +159,18 @@ class ManytoManyFieldsTest(BaseTests):
         p = Post.get(id=5)
         self.assertEqual(p.tags.all(), [])
         t = Tag.get(id=5)
-        p.tags.append(t)
+        p.tags.add(t)
         self.assertEqual([t.id for t in p.tags.all()], [t.id])
         self.assertEqual([p.id for p in t.posts.all()], [p.id])
-        p.tags.remove("tag_id=5")
+        p.tags.remove(t)
         self.assertEqual(p.tags.all(), [])
         self.assertEqual(t.posts.all(), [])
 
     def test_mtom_count(self):
         p = Post.get(id=3)
         self.assertEqual(p.tags.count(), 0)
-        p.tags.append(Tag.get(id=3))
-        p.tags.append(Tag.get(id=4))
+        p.tags.add(Tag.get(id=3))
+        p.tags.add(Tag.get(id=4))
         self.assertEqual(p.tags.count(), 2)
 
 

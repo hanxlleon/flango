@@ -98,10 +98,12 @@ class ManyToManyField(object):
     def __init__(self, relate_table, to_table):
         self.relate_table = relate_table
         self.to_table = to_table
+
         self.name = None
         self.tablename = None
         self.id = None
         self.db = None
+
         self.relate_model = None
         self.relate_column = None
 
@@ -110,21 +112,29 @@ class ManyToManyField(object):
         self.tablename = tablename
         self.db = db
         self.relate_model = self.db.tables[self.relate_table]
-        self.to_model = self.db.tables[self.to_table]
+        # self.to_model = self.db.tables[self.to_table]
         self.relate_column = '{0}_id'.format(self.tablename)
+        self.opposite_column = '{0}_id'.format(self.to_table)
 
     def add(self, instance):
-        # TODO validate instance
-        pass
+        insert = {
+            self.relate_column: self.id,
+            self.opposite_column: instance.id
+        }
+        self.relate_model(**insert).save()
 
     def remove(self, instance):
-        pass
+        self.relate_model.delete(**{self.opposite_column: instance.id}).commit()
 
     def all(self):
-        pass
+        self.to_model = self.db.tables[self.to_table]
+
+        opposite_instances = self.relate_model.select().where(**{self.relate_column: self.id}).all()
+        id_list = [getattr(instance, self.opposite_column) for instance in opposite_instances]
+        return [self.to_model.get(id=opposite_id) for opposite_id in id_list]
 
     def count(self):
-        pass
+        return len(self.all())
 
 
 class MetaModel(type):
@@ -145,10 +155,8 @@ class MetaModel(type):
         fields = {}
         refed_fields = {}
         has_primary_key = False
-        setattr(cls, 'has_relationship', False)
         for field_name, field in cls.__dict__.items():
             if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyField):
-                setattr(cls, 'has_relationship', True)
                 field.update(field_name, cls.tablename, cls.db)
                 refed_fields[field_name] = field
             if isinstance(field, Field):

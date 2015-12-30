@@ -7,7 +7,7 @@ class Post_Tag_Relate(database.Model):
     Many to many relationship test.
     """
     id = database.PrimaryKeyField()
-    post_id = database.ForeignKeyField('self_define_post')
+    my_post_id = database.ForeignKeyField('my_post')
     tag_id = database.ForeignKeyField('tag')
 
     def __repr__(self):
@@ -43,7 +43,7 @@ class Tag(database.Model):
     id = database.PrimaryKeyField()
     name = database.CharField(100)
 
-    posts = database.ManyToManyField(relate_table='post_tag_relate', to_table='self_define_post')
+    posts = database.ManyToManyField(relate_table='post_tag_relate', to_table='my_post')
 
     def __repr__(self):
         return '<Tag {0}>'.format(self.name)
