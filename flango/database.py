@@ -1,8 +1,6 @@
 # coding: utf-8
 import sqlite3
-import sys
 import threading
-from datetime import datetime
 
 
 class Field(object):
@@ -11,15 +9,12 @@ class Field(object):
         self.name = None
 
     def create_sql(self):
-        raise NotImplementedError
+        return '"{0}" {1}'.format(self.name, self.column_type)
 
 
 class IntegerField(Field):
     def __init__(self):
         super(IntegerField, self).__init__('INTEGER')
-
-    def create_sql(self):
-        return '"{0}" {1}'.format(self.name, self.column_type)
 
     def sql_format(self, data):
         return str(int(data))
@@ -37,12 +32,17 @@ class CharField(Field):
         return '"{0}"'.format(str(data))
 
 
+class TextField(Field):
+    def __init__(self):
+        super(TextField, self).__init__('TEXT')
+
+    def sql_format(self, data):
+        return '"{0}"'.format(str(data))
+
+
 class DateTimeField(Field):
     def __init__(self):
         super(DateTimeField, self).__init__('DATETIME')
-
-    def create_sql(self):
-        return '"%s" %s' % (self.name, "DATETIME")
 
     def sql_format(self, data):
         return '"{0}"'.format(data.strftime('%Y-%m-%d %H:%M:%S'))
@@ -67,26 +67,97 @@ class ForeignKeyField(IntegerField):
         )
 
 
+class ForeignKeyReverseField(object):
+
+    def __init__(self, from_table):
+        self.from_table = from_table
+        self.name = None
+        self.tablename = None
+        self.id = None
+        self.db = None
+        self.from_model = None
+        self.relate_column = None
+
+    def update(self, name, tablename, db):
+        self.name = name
+        self.tablename = tablename
+        self.db = db
+        self.from_model = self.db.tables[self.from_table]
+        for k, v in self.from_model.__dict__.iteritems():
+            if isinstance(v, ForeignKeyField) and v.to_table == self.tablename:
+                self.relate_column = k
+
+    def all(self):
+        return self.from_model.select('*').where('='.join([self.relate_column, str(self.id)])).all()
+
+    def count(self):
+        return self.from_model.select('*').where('='.join([self.relate_column, str(self.id)])).count()
+
+
+class ManyToManyField(object):
+    def __init__(self, relate_table, to_table):
+        self.relate_table = relate_table
+        self.to_table = to_table
+        self.name = None
+        self.tablename = None
+        self.id = None
+        self.db = None
+        self.relate_model = None
+        self.relate_column = None
+
+    def update(self, name, tablename, db):
+        self.name = name
+        self.tablename = tablename
+        self.db = db
+        self.relate_model = self.db.tables[self.relate_table]
+        self.to_model = self.db.tables[self.to_table]
+        self.relate_column = '{0}_id'.format(self.tablename)
+
+    def add(self, instance):
+        # TODO validate instance
+        pass
+
+    def remove(self, instance):
+        pass
+
+    def all(self):
+        pass
+
+    def count(self):
+        pass
+
+
 class MetaModel(type):
-    def __new__(cls, name, bases, attrs):
+    def __new__(mcs, name, bases, attrs):
         if name == 'Model':
-            return super(MetaModel, cls).__new__(cls, name, bases, attrs)
+            return super(MetaModel, mcs).__new__(mcs, name, bases, attrs)
+
+        cls = super(MetaModel, mcs).__new__(mcs, name, bases, attrs)
 
         if 'Meta' not in attrs.keys() or not hasattr(attrs['Meta'], 'db_table'):
-            attrs['tablename'] = name.lower()
+            setattr(cls, 'tablename', name.lower())
         else:
-            attrs['tablename'] = attrs['Meta'].db_table
+            setattr(cls, 'tablename', attrs['Meta'].db_table)
+
+        if hasattr(cls, 'db'):
+            getattr(cls, 'db').tables[cls.tablename] = cls
 
         fields = {}
+        refed_fields = {}
         has_primary_key = False
-        for k, v in attrs.iteritems():
-            if isinstance(v, Field):
-                v.name = k
-                fields[k] = v
-                if isinstance(v, PrimaryKeyField):
+        setattr(cls, 'has_relationship', False)
+        for field_name, field in cls.__dict__.items():
+            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyField):
+                setattr(cls, 'has_relationship', True)
+                field.update(field_name, cls.tablename, cls.db)
+                refed_fields[field_name] = field
+            if isinstance(field, Field):
+                field.name = field_name
+                fields[field_name] = field
+                if isinstance(field, PrimaryKeyField):
                     has_primary_key = True
 
-        for field in fields.keys():
+        for field in fields.keys() or refed_fields.keys():
             attrs.pop(field)
 
         if not has_primary_key:
@@ -94,8 +165,10 @@ class MetaModel(type):
             pk.name = 'id'
             fields['id'] = pk
 
-        attrs['fields'] = fields
-        return super(MetaModel, cls).__new__(cls, name, bases, attrs)
+        setattr(cls, 'fields', fields)
+        setattr(cls, 'refed_fields', refed_fields)
+
+        return cls
 
 
 class ModelException(Exception):
@@ -106,65 +179,35 @@ class Model(object):
     __metaclass__ = MetaModel
 
     def __init__(self, **kwargs):
-        for k, v in kwargs.iteritems():
-            if k not in self.fields.keys():
-                raise ModelException('Unknown column: {0}'.format(k))
-            setattr(self, k, v)
+        for name, field in kwargs.iteritems():
+            if name not in self.fields.keys():
+                raise ModelException('Unknown column: {0}'.format(name))
+            setattr(self, name, field)
+
         super(Model, self).__init__()
 
     @classmethod
     def get(cls, **kwargs):
-        results = cls.filter(**kwargs)
-
-        if len(results) != 1:
-            raise ModelException('The count of results must equal to 1')
-        return results
-
-    @classmethod
-    def filter(cls, **kwargs):
-        base_query = 'select * from {tablename} where {where_sql};'
-        where_list = []
-
-        for k, v in kwargs.iteritems():
-            if k not in cls.fields.keys():
-                raise ModelException('Unknown column: {0}'.format(k))
-            # where_list.append('{0}={1}'.format(k, cls.fields[k].sql_format(v)))
-            where_list.append('{0}="{1}"'.format(k, str(v)))
-
-        sql = base_query.format(
-            tablename=cls.tablename,
-            where_sql=' and '.join(where_list)
-        )
-
-        cursor = cls.db.execute(sql)
-        cls.db.commit()
-        results = cursor.fetchall()
-
-        return results
-
-    @staticmethod
-    def first(results):
-        # limit 1
-        return results[0]
+        return SelectQuery(cls).where(**kwargs).first()
 
     @classmethod
     def select(cls, *args):
         return SelectQuery(cls, args)
-    #
-    # @classmethod
-    # def update(cls, *args, **kwargs):
-    #     return UpdateQuery(cls, args, **kwargs)
-    #
-    # @classmethod
-    # def delete(cls, *args, **kwargs):
-    #     return DeleteQuery(cls, args, **kwargs)
+
+    @classmethod
+    def update(cls, *args, **kwargs):
+        return UpdateQuery(cls, *args, **kwargs)
+
+    @classmethod
+    def delete(cls, *args, **kwargs):
+        return DeleteQuery(cls, args, **kwargs)
 
     def save(self):
         base_query = 'insert into {tablename}({columns}) values({items});'
         columns = []
         values = []
         for field_name, field_model in self.fields.iteritems():
-            if hasattr(self, field_name):
+            if hasattr(self, field_name) and not isinstance(getattr(self, field_name), Field):
                 columns.append(field_name)
                 values.append(field_model.sql_format(getattr(self, field_name)))
 
@@ -179,7 +222,6 @@ class Model(object):
 
 
 class Sqlite(threading.local):
-
     def __init__(self, database):
         super(Sqlite, self).__init__()
         self.database = database
@@ -231,20 +273,26 @@ class Sqlite(threading.local):
         return cursor
 
 
+class QueryException(Exception):
+    pass
+
+
 class SelectQuery(object):
     """ select title, content from post where id = 1 and title = "my title";
         select title, content from post where id > 3;
     """
 
     def __init__(self, model, *args):
-        self.base_sql = 'select {columns} from {tablename};'
         self.model = model
-        self.query = list(*args) if args != ((),) else ['*']
+        self.base_sql = 'select {columns} from {tablename};'
+
+        query_args = list(*args) if list(*args) else ['*']
+        self.query = ', '.join([str(column) for column in query_args])
 
     @property
     def sql(self):
         return self.base_sql.format(
-            columns=', '.join([str(column) for column in self.query]),
+            columns=self.query,
             tablename=self.model.tablename
         )
 
@@ -252,8 +300,8 @@ class SelectQuery(object):
         return self._execute(self.sql)
 
     def first(self):
-        sql = '{0} limit 1;'.format(self.sql.rstrip(';'))
-        return self._execute(sql)[0]
+        self.base_sql = '{0} limit 1;'.format(self.base_sql.rstrip(';'))
+        return self._execute(self.sql)[0]
 
     def where(self, *args, **kwargs):
         where_list = []
@@ -261,15 +309,14 @@ class SelectQuery(object):
             where_list.append('{0}="{1}"'.format(k, str(v)))
         where_list.extend(list(args))
 
-        sql = '{0} where {1};'.format(self.sql.rstrip(';'), ' and '.join(where_list))
-        return self._execute(sql)
+        self.base_sql = '{0} where {1};'.format(self.base_sql.rstrip(';'), ' and '.join(where_list))
+        return self
 
     def _base_function(self, func):
-        columns = ', '.join([str(column) for column in self.query])
         sql = self.base_sql.format(
-                  columns='{0}({1})'.format(func, columns),
-                  tablename=self.model.tablename
-              )
+            columns='{0}({1})'.format(func, self.query),
+            tablename=self.model.tablename
+        )
         cursor = self.model.db.execute(sql)
         record = cursor.fetchone()
         return record[0]
@@ -278,7 +325,9 @@ class SelectQuery(object):
         return self._base_function('count')
 
     def max(self):
-        """Person.select('id').max()"""
+        """
+        Post.select('id').max()
+        """
         return self._base_function('max')
 
     def min(self):
@@ -289,6 +338,23 @@ class SelectQuery(object):
 
     def sum(self):
         return self._base_function('sum')
+
+    def orderby(self, column, order):
+        """
+        Post.select().orderby('id', 'desc').all()
+        """
+        self.base_sql = '{0} order by {1} {2};'.format(self.base_sql.rstrip(';'), column, order)
+        return self
+
+    def like(self, pattern):
+        """
+        Post.select('id').where('content').like('%cont%')
+        """
+        if 'where' not in self.base_sql:
+            raise QueryException('Like query must have a where clause before')
+
+        self.base_sql = '{0} like "{1}";'.format(self.base_sql.rstrip(';'), pattern)
+        return self
 
     def _execute(self, sql):
         cursor = self.model.db.execute(sql)
@@ -303,35 +369,55 @@ class SelectQuery(object):
             instance = self.model(**dict(zip(descriptor, record)))
         except TypeError:
             return None
+
+        for name, field in instance.refed_fields.iteritems():
+            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyField):
+                field.id = instance.id
+
         return instance
 
 
+class UpdateQuery(object):
+    def __init__(self, model, *args, **kwargs):
+        self.model = model
+        self.base_sql = 'update {tablename} set {update_columns};'
+        self.update_list = []
+        self.where_list = list(*args)
+        for k, v in kwargs.iteritems():
+            self.where_list.append('{0}="{1}"'.format(k, v))
+
+        if self.where_list:
+            self.base_sql = '{0} where {1}'.format(self.base_sql.rstrip(';'), ' and '.join(self.where_list))
+
+    def set(self, **kwargs):
+        for k, v in kwargs.iteritems():
+            self.update_list.append('{0}="{1}"'.format(k, v))
+        return self
+
+    @property
+    def sql(self):
+        return self.base_sql.format(
+            tablename=self.model.tablename,
+            update_columns=' and '.join(self.update_list)
+        )
+
+    def commit(self):
+        return self.model.db.execute(self.sql, commit=True)
+
+
+class DeleteQuery(object):
+    def __init__(self, model, *args, **kwargs):
+        self.model = model
+        self.sql = 'delete from {0};'.format(self.model.tablename)
+        where_list = list(*args)
+        for k, v in kwargs.iteritems():
+            where_list.append('{0}="{1}"'.format(k, v))
+
+        if where_list:
+            self.sql = '{0} where {1}'.format(self.sql.rstrip(';'), ' and '.join(where_list))
+
+    def commit(self):
+        return self.model.db.execute(self.sql, commit=True)
+
 if __name__ == '__main__':
-    db = Sqlite('test.db')
-
-    class Person(Model):
-        id = PrimaryKeyField()
-        name = CharField(max_lenth=20)
-        age = IntegerField()
-        create_time = DateTimeField()
-
-        class Meta:
-            db_table = 'test'
-
-    # p = Person()
-    # # db.create_table(p)
-    # p.age = 12
-    # p.name = 'test'
-    # p.create_time = datetime.now()
-    # p.save()
-    # p2 = Person.get(id=1, name='test')
-    # p = Person.select('id', 'name')
-    # db.drop_table(p)
-    # p = Person.select('id', 'name').first()
-    # p = Person.select().where(id=1)[0]
-    # p = Person.select().where('id<3', name='test')
-    p = Person.select('name').max()
-    print p
-    # print p.id, p.name
-    pass
-
+   pass
