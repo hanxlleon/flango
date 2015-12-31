@@ -341,7 +341,7 @@ class Loader(object):
             raise TemplateException('Template file {0} is not exist.'.format(p))
 
         with open(p) as f:
-            self.cache.set(p, self.engine(f.read()))
+            self.cache.set(p, self.engine(f.read(), path=self.path))
 
         return self.cache.get(p)
 

@@ -68,73 +68,130 @@ class ForeignKeyField(IntegerField):
 
 
 class ForeignKeyReverseField(object):
-
     def __init__(self, from_table):
         self.from_table = from_table
         self.name = None
         self.tablename = None
-        self.id = None
+        self.instance_id = None
         self.db = None
         self.from_model = None
         self.relate_column = None
 
-    def update(self, name, tablename, db):
+    def update_attr(self, name, tablename, db):
         self.name = name
         self.tablename = tablename
         self.db = db
-        self.from_model = self.db.tables[self.from_table]
+        self.from_model = self.db.__tables__[self.from_table]
         for k, v in self.from_model.__dict__.iteritems():
             if isinstance(v, ForeignKeyField) and v.to_table == self.tablename:
                 self.relate_column = k
 
     def all(self):
-        return self.from_model.select('*').where('='.join([self.relate_column, str(self.id)])).all()
+        return self._query_sql().all()
 
     def count(self):
-        return self.from_model.select('*').where('='.join([self.relate_column, str(self.id)])).count()
+        return self._query_sql().count()
+
+    def _query_sql(self):
+        return self.from_model.select().where(**{self.relate_column: self.instance_id})
 
 
-class ManyToManyField(object):
-    def __init__(self, relate_table, to_table):
-        self.relate_table = relate_table
-        self.to_table = to_table
+class ManyToManyBaseField(object):
+    def __init__(self, to_model):
+        self.to_model = to_model
 
         self.name = None
         self.tablename = None
-        self.id = None
         self.db = None
 
-        self.relate_model = None
-        self.relate_column = None
+        self.instance_id = None
 
-    def update(self, name, tablename, db):
+        self.relate_model = None
+        self.relate_table = None
+        self.relate_column = None
+        self.to_table = None
+        self.to_column = None
+
+    def update_attr(self, name, tablename, db):
         self.name = name
         self.tablename = tablename
         self.db = db
-        self.relate_model = self.db.tables[self.relate_table]
-        # self.to_model = self.db.tables[self.to_table]
-        self.relate_column = '{0}_id'.format(self.tablename)
-        self.opposite_column = '{0}_id'.format(self.to_table)
 
-    def add(self, instance):
+    def add(self, to_instance):
         insert = {
-            self.relate_column: self.id,
-            self.opposite_column: instance.id
+            self.relate_column: self.instance_id,
+            self.to_column: to_instance.id
         }
         self.relate_model(**insert).save()
 
-    def remove(self, instance):
-        self.relate_model.delete(**{self.opposite_column: instance.id}).commit()
+    def remove(self, to_instance):
+        self.relate_model.delete(**{self.to_column: to_instance.id}).commit()
 
     def all(self):
-        self.to_model = self.db.tables[self.to_table]
-
-        opposite_instances = self.relate_model.select().where(**{self.relate_column: self.id}).all()
-        id_list = [getattr(instance, self.opposite_column) for instance in opposite_instances]
-        return [self.to_model.get(id=opposite_id) for opposite_id in id_list]
+        return self._query_sql().all()
 
     def count(self):
-        return len(self.all())
+        return self._query_sql().count()
+
+    def _query_sql(self):
+        self.to_model = self.db.__tables__[self.to_table]
+
+        relate_instances = self.relate_model.select().where(**{self.relate_column: self.instance_id}).all()
+        to_ids = [str(getattr(instance, self.to_column)) for instance in relate_instances]
+        where_sql = 'id in ({0})'.format(', '.join(to_ids))
+
+        return self.to_model.select().where(where_sql)
+
+
+class ManyToManyField(ManyToManyBaseField):
+    def __init__(self, to_model):
+        super(ManyToManyField, self).__init__(to_model)
+
+    def create_m2m_table(self):
+        if self.to_model not in self.db.__tables__.values():
+            raise DatabaseException('Related table "{0}" not exists'.format(self.to_model.__tablename__))
+
+        self.to_table = self.to_model.__tablename__
+        self.to_column = '{0}_id'.format(self.to_table)
+        self.relate_column = '{0}_id'.format(self.tablename)
+
+        class_name = '{0}_{1}'.format(self.to_table, self.tablename)
+        class_attrs = {
+            self.relate_column: ForeignKeyField(self.tablename),
+            self.to_column: ForeignKeyField(self.to_table)
+        }
+        m2m_model = type(class_name, (Model, ), class_attrs)
+        self.db.create_table(m2m_model)
+
+        self.relate_model = m2m_model
+        self.relate_table = getattr(m2m_model, '__tablename__')
+        self.db.__tables__[self.relate_table] = m2m_model
+
+        self._create_reversed_field()
+
+    def drop_m2m_table(self):
+        try:
+            table_model = self.db.__tables__[self.relate_table]
+        except KeyError:
+            raise DatabaseException('Can not drop this table: "{0}" not exists'.format(self.relate_table))
+        self.db.drop_table(table_model)
+        self._delete_reversed_field()
+
+    def _create_reversed_field(self):
+        field = ManyToManyBaseField(self.db.__tables__[self.tablename])
+        field.db = self.db
+        field.name = '{0}s'.format(self.tablename)
+        field.to_table, field.tablename = self.tablename, self.to_table
+        field.to_column, field.relate_column = self.relate_column, self.to_column
+        field.relate_model, field.relate_table = self.relate_model, self.relate_table
+
+        setattr(self.to_model, field.name, field)
+        self.to_model.__refed_fields__[field.name] = field
+
+    def _delete_reversed_field(self):
+        to_column = '{0}s'.format(self.tablename)
+        delattr(self.to_model, to_column)
+        del self.to_model.__refed_fields__[to_column]
 
 
 class MetaModel(type):
@@ -145,19 +202,19 @@ class MetaModel(type):
         cls = super(MetaModel, mcs).__new__(mcs, name, bases, attrs)
 
         if 'Meta' not in attrs.keys() or not hasattr(attrs['Meta'], 'db_table'):
-            setattr(cls, 'tablename', name.lower())
+            setattr(cls, '__tablename__', name.lower())
         else:
-            setattr(cls, 'tablename', attrs['Meta'].db_table)
+            setattr(cls, '__tablename__', attrs['Meta'].db_table)
 
-        if hasattr(cls, 'db'):
-            getattr(cls, 'db').tables[cls.tablename] = cls
+        if hasattr(cls, '__db__'):
+            getattr(cls, '__db__').__tables__[cls.__tablename__] = cls
 
         fields = {}
         refed_fields = {}
         has_primary_key = False
         for field_name, field in cls.__dict__.items():
             if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyField):
-                field.update(field_name, cls.tablename, cls.db)
+                field.update_attr(field_name, cls.__tablename__, cls.__db__)
                 refed_fields[field_name] = field
             if isinstance(field, Field):
                 field.name = field_name
@@ -165,21 +222,17 @@ class MetaModel(type):
                 if isinstance(field, PrimaryKeyField):
                     has_primary_key = True
 
-        for field in fields.keys() or refed_fields.keys():
-            attrs.pop(field)
-
         if not has_primary_key:
             pk = PrimaryKeyField()
             pk.name = 'id'
             fields['id'] = pk
 
-        setattr(cls, 'fields', fields)
-        setattr(cls, 'refed_fields', refed_fields)
-
+        setattr(cls, '__fields__', fields)
+        setattr(cls, '__refed_fields__', refed_fields)
         return cls
 
 
-class ModelException(Exception):
+class DatabaseException(Exception):
     pass
 
 
@@ -188,8 +241,8 @@ class Model(object):
 
     def __init__(self, **kwargs):
         for name, field in kwargs.iteritems():
-            if name not in self.fields.keys():
-                raise ModelException('Unknown column: {0}'.format(name))
+            if name not in self.__fields__.keys():
+                raise DatabaseException('Unknown column: {0}'.format(name))
             setattr(self, name, field)
 
         super(Model, self).__init__()
@@ -214,19 +267,17 @@ class Model(object):
         base_query = 'insert into {tablename}({columns}) values({items});'
         columns = []
         values = []
-        for field_name, field_model in self.fields.iteritems():
+        for field_name, field_model in self.__fields__.iteritems():
             if hasattr(self, field_name) and not isinstance(getattr(self, field_name), Field):
                 columns.append(field_name)
                 values.append(field_model.sql_format(getattr(self, field_name)))
 
         sql = base_query.format(
-            tablename=self.tablename,
+            tablename=self.__tablename__,
             columns=', '.join(columns),
             items=', '.join(values)
         )
-
-        self.db.execute(sql)
-        self.db.commit()
+        self.__db__.execute(sql=sql, commit=True)
 
 
 class Sqlite(threading.local):
@@ -235,34 +286,30 @@ class Sqlite(threading.local):
         self.database = database
         self.conn = sqlite3.connect(self.database, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
 
-        self.tables = {}
+        self.__tables__ = {}
         setattr(self, 'Model', Model)
-        setattr(self.Model, 'db', self)
-
-    def create_all(self):
-        for table_name, table_model in self.tables.items():
-            if issubclass(table_model, self.Model):
-                print("create table {0}.".format(table_name))
-                self.create_table(table_model)
+        setattr(self.Model, '__db__', self)
 
     def create_table(self, model):
-        table_name = model.tablename
-        create_sql = ', '.join(field.create_sql() for field in model.fields.values())
+        tablename = model.__tablename__
+        create_sql = ', '.join(field.create_sql() for field in model.__fields__.values())
+        self.execute('create table {0} ({1});'.format(tablename, create_sql), commit=True)
 
-        cursor = self.conn.cursor()
-        cursor.execute('create table {0} ({1});'.format(table_name, create_sql))
+        if tablename not in self.__tables__.keys():
+            self.__tables__[tablename] = model
 
-        if table_name not in self.tables.keys():
-            self.tables[table_name] = model
-        self.commit()
+        for field in model.__refed_fields__.values():
+            if isinstance(field, ManyToManyField):
+                field.create_m2m_table()
 
     def drop_table(self, model):
-        table_name = model.tablename
+        tablename = model.__tablename__
+        self.execute('drop table {0};'.format(tablename), commit=True)
+        del self.__tables__[tablename]
 
-        cursor = self.conn.cursor()
-        cursor.execute('drop table {0};'.format(table_name))
-        del self.tables[table_name]
-        self.commit()
+        for name, field in model.__refed_fields__.iteritems():
+            if isinstance(field, ManyToManyField):
+                field.drop_m2m_table()
 
     def commit(self):
         self.conn.commit()
@@ -281,10 +328,6 @@ class Sqlite(threading.local):
         return cursor
 
 
-class QueryException(Exception):
-    pass
-
-
 class SelectQuery(object):
     """ select title, content from post where id = 1 and title = "my title";
         select title, content from post where id > 3;
@@ -301,7 +344,7 @@ class SelectQuery(object):
     def sql(self):
         return self.base_sql.format(
             columns=self.query,
-            tablename=self.model.tablename
+            tablename=self.model.__tablename__
         )
 
     def all(self):
@@ -323,9 +366,9 @@ class SelectQuery(object):
     def _base_function(self, func):
         sql = self.base_sql.format(
             columns='{0}({1})'.format(func, self.query),
-            tablename=self.model.tablename
+            tablename=self.model.__tablename__
         )
-        cursor = self.model.db.execute(sql)
+        cursor = self.model.__db__.execute(sql=sql, commit=True)
         record = cursor.fetchone()
         return record[0]
 
@@ -347,7 +390,7 @@ class SelectQuery(object):
     def sum(self):
         return self._base_function('sum')
 
-    def orderby(self, column, order):
+    def orderby(self, column, order='desc'):
         """
         Post.select().orderby('id', 'desc').all()
         """
@@ -359,13 +402,13 @@ class SelectQuery(object):
         Post.select('id').where('content').like('%cont%')
         """
         if 'where' not in self.base_sql:
-            raise QueryException('Like query must have a where clause before')
+            raise DatabaseException('Like query must have a where clause before')
 
         self.base_sql = '{0} like "{1}";'.format(self.base_sql.rstrip(';'), pattern)
         return self
 
     def _execute(self, sql):
-        cursor = self.model.db.execute(sql)
+        cursor = self.model.__db__.execute(sql)
         descriptor = list(i[0] for i in cursor.description)
         records = cursor.fetchall()
         query_set = [self._make_instance(descriptor, record) for record in records]
@@ -378,9 +421,9 @@ class SelectQuery(object):
         except TypeError:
             return None
 
-        for name, field in instance.refed_fields.iteritems():
-            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyField):
-                field.id = instance.id
+        for name, field in instance.__refed_fields__.iteritems():
+            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyBaseField):
+                field.instance_id = instance.id
 
         return instance
 
@@ -405,18 +448,18 @@ class UpdateQuery(object):
     @property
     def sql(self):
         return self.base_sql.format(
-            tablename=self.model.tablename,
+            tablename=self.model.__tablename__,
             update_columns=' and '.join(self.update_list)
         )
 
     def commit(self):
-        return self.model.db.execute(self.sql, commit=True)
+        return self.model.__db__.execute(sql=self.sql, commit=True)
 
 
 class DeleteQuery(object):
     def __init__(self, model, *args, **kwargs):
         self.model = model
-        self.sql = 'delete from {0};'.format(self.model.tablename)
+        self.sql = 'delete from {0};'.format(self.model.__tablename__)
         where_list = list(*args)
         for k, v in kwargs.iteritems():
             where_list.append('{0}="{1}"'.format(k, v))
@@ -425,7 +468,4 @@ class DeleteQuery(object):
             self.sql = '{0} where {1}'.format(self.sql.rstrip(';'), ' and '.join(where_list))
 
     def commit(self):
-        return self.model.db.execute(self.sql, commit=True)
-
-if __name__ == '__main__':
-   pass
+        return self.model.__db__.execute(sql=self.sql, commit=True)
