@@ -31,9 +31,11 @@ class Router(object):
         p = g.group('prefix')
         if g.group('type'):
             assert g.group('type') == 'int'
-            p = '{0}(?P<args>\d+)'.format(p)
+            p = r'{0}(?P<args>\d+)$'.format(p)
         elif g.group('args'):
-            p = '{0}(?P<args>\w+)'.format(p)
+            p = r'{0}(?P<args>\w+)$'.format(p)
+        else:
+            p = r'{0}$'.format(p)
 
         self.rules[re.compile(p)] = (fn, g.group('args')) if g.group('args') else (fn, None)
 
@@ -64,8 +66,8 @@ class Router(object):
                 if args not in kwargs.keys():
                     raise RouterException('Need an argument.')
 
-                return rule.pattern.replace('(?P<args>\d+)', str(kwargs[args])).replace('(?P<args>\w+)', str(kwargs[args]))
-            return rule.pattern
+                return rule.pattern.replace('(?P<args>\d+)$', str(kwargs[args])).replace('(?P<args>\w+)$', str(kwargs[args]))
+            return rule.pattern.rstrip('$')
         else:
             raise RouterException("Callable object doesn't match any routing rule.")
 
