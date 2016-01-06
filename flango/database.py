@@ -7,10 +7,14 @@
                 >>>from datetime import datetime
                 >>>from flango import database
 
+                >>>db = database.Sqlite('blog.db')
+
                 >>>class Post(db.Model):
                 ...    title = database.CharField(20)
                 ...    content = database.TextField()
                 ...    created_time = database.DateTimeField()
+
+                >>>db.create_table(Post)
 
                 >>>post = Post(title='post title', content='post content', created_time=datetime.now())
                 >>>post.save()
@@ -23,11 +27,14 @@
                 Out: [<Post post title>]
 
     The ManyToManyField just like Django ManyToManyField:
+
                 >>>class Tag(db.Model):
                 ...    name = database.CharField(50)
                 ...    posts = database.ManyToManyField(Post)
+
     When create table from class `Tag`, ORM will auto-create a table `post_tag` which referenced `Post` and `Tag`.
     We can add tag to the post like this:
+
                 >>>tag = Tag(name='tag')
                 >>>tag.save()
                 >>>post.tags.add(tag)
@@ -94,7 +101,7 @@ class PrimaryKeyField(IntegerField):
         super(PrimaryKeyField, self).__init__()
 
     def create_sql(self):
-        return '"%s" %s NOT NULL PRIMARY KEY' % (self.name, "INTEGER")
+        return '"{0}" {1} NOT NULL PRIMARY KEY'.format(self.name, self.column_type)
 
 
 class ForeignKeyField(IntegerField):
@@ -103,8 +110,11 @@ class ForeignKeyField(IntegerField):
         super(ForeignKeyField, self).__init__()
 
     def create_sql(self):
-        return '%s %s NOT NULL REFERENCES "%s" ("%s")' % (
-            self.name, 'INTEGER', self.to_table, 'id'
+        return '{column_name} {column_type} NOT NULL REFERENCES "{tablename}" ("{to_column}")'.format(
+            column_name=self.name,
+            column_type=self.column_type,
+            tablename=self.to_table,
+            to_column='id'
         )
 
 
@@ -297,7 +307,7 @@ class Model(object):
 
     @classmethod
     def select(cls, *args):
-        return SelectQuery(cls, args)
+        return SelectQuery(cls, *args)
 
     @classmethod
     def update(cls, *args, **kwargs):
@@ -305,7 +315,7 @@ class Model(object):
 
     @classmethod
     def delete(cls, *args, **kwargs):
-        return DeleteQuery(cls, args, **kwargs)
+        return DeleteQuery(cls, *args, **kwargs)
 
     def save(self):
         base_query = 'insert into {tablename}({columns}) values({items});'
@@ -464,7 +474,6 @@ class SelectQuery(object):
         return query_set
 
     def _make_instance(self, descriptor, record):
-        # must handle empty case.
         try:
             instance = self.model(**dict(zip(descriptor, record)))
         except TypeError:
