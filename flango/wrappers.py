@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import threading
 import httplib
 from cgi import FieldStorage
@@ -168,6 +169,3 @@ class Response(BaseObject):
 
     def set_content_type(self, value):
         self.headers['Content-Type'] = value
-
-    content_type = property(
-        get_content_type, set_content_type, None, get_content_type.__doc__)

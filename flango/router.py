@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import re
 
 
@@ -6,7 +7,19 @@ class RouterException(Exception):
 
 
 class Router(object):
+    """A Router for url like Flask.
+
+    Firstly, register a url with a function and methods.
+
+    The url can be a pattern like:
+    "/author/<username>" which will match urls "http://hostname:port/author/Jone" or "http://hostname:port/author/Bob",
+    "/post/<int:id>" which will match urls "http://hostname:port/post/1" or "http://hostname:port/post/20".
+
+    Then we can get the function with the registered path or get the path with whe registered function.
+    """
+
     def __init__(self):
+        # key: path pattern, value: function and args
         self.rules = {}
         self.url_pattern = re.compile(
             r'(?P<prefix>(/\w*)+)(<((?P<type>\w+):)?(?P<args>\w+)>)?'
@@ -72,6 +85,7 @@ class Router(object):
             raise RouterException("Callable object doesn't match any routing rule.")
 
     def all_callables(self):
+        """ All registered functions. """
         return [fn for fn, args in self.rules.values()]
 
 

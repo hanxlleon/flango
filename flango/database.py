@@ -1,6 +1,46 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
+
+"""
+    ORM for sqlite3 like Django ORM.
+
+    Usage:
+                >>>from datetime import datetime
+                >>>from flango import database
+
+                >>>class Post(db.Model):
+                ...    title = database.CharField(20)
+                ...    content = database.TextField()
+                ...    created_time = database.DateTimeField()
+
+                >>>post = Post(title='post title', content='post content', created_time=datetime.now())
+                >>>post.save()
+
+                >>>post.id, post.title, post.content
+                Out: (5, 'post title', 'post content', datetime.datetime(2016, 1, 6, 17, 25, 37, 342000))
+
+
+                >>>print Post.select().where(id=5).all()
+                Out: [<Post post title>]
+
+    The ManyToManyField just like Django ManyToManyField:
+                >>>class Tag(db.Model):
+                ...    name = database.CharField(50)
+                ...    posts = database.ManyToManyField(Post)
+    When create table from class `Tag`, ORM will auto-create a table `post_tag` which referenced `Post` and `Tag`.
+    We can add tag to the post like this:
+                >>>tag = Tag(name='tag')
+                >>>tag.save()
+                >>>post.tags.add(tag)
+                >>>post.tags.all()
+                Out: [<Tag tag>]
+
+"""
+
 import sqlite3
 import threading
+
+
+encoding_type = 'utf-8'
 
 
 class Field(object):
@@ -9,6 +49,7 @@ class Field(object):
         self.name = None
 
     def create_sql(self):
+        """Return sql statement for create table."""
         return '"{0}" {1}'.format(self.name, self.column_type)
 
 
@@ -96,7 +137,7 @@ class ForeignKeyReverseField(object):
         return self.from_model.select().where(**{self.relate_column: self.instance_id})
 
 
-class ManyToManyBaseField(object):
+class ManyToManyFieldBase(object):
     def __init__(self, to_model):
         self.to_model = to_model
 
@@ -143,7 +184,7 @@ class ManyToManyBaseField(object):
         return self.to_model.select().where(where_sql)
 
 
-class ManyToManyField(ManyToManyBaseField):
+class ManyToManyField(ManyToManyFieldBase):
     def __init__(self, to_model):
         super(ManyToManyField, self).__init__(to_model)
 
@@ -169,25 +210,7 @@ class ManyToManyField(ManyToManyBaseField):
         self.create_reversed_field()
 
     def create_m2m_table(self):
-        # if self.to_model not in self.db.__tables__.values():
-        #     raise DatabaseException('Related table "{0}" not exists'.format(self.to_model.__tablename__))
-        #
-        # self.to_table = self.to_model.__tablename__
-        # self.to_column = '{0}_id'.format(self.to_table)
-        # self.relate_column = '{0}_id'.format(self.tablename)
-        #
-        # class_name = '{0}_{1}'.format(self.to_table, self.tablename)
-        # class_attrs = {
-        #     self.relate_column: ForeignKeyField(self.tablename),
-        #     self.to_column: ForeignKeyField(self.to_table)
-        # }
-        # m2m_model = type(class_name, (Model, ), class_attrs)
         self.db.create_table(self.relate_model)
-
-        # self.relate_model = m2m_model
-        # self.relate_table = getattr(m2m_model, '__tablename__')
-        # self.db.__tables__[self.relate_table] = m2m_model
-
         self.create_reversed_field()
 
     def drop_m2m_table(self):
@@ -199,7 +222,7 @@ class ManyToManyField(ManyToManyBaseField):
         self.delete_reversed_field()
 
     def create_reversed_field(self):
-        field = ManyToManyBaseField(self.db.__tables__[self.tablename])
+        field = ManyToManyFieldBase(self.db.__tables__[self.tablename])
         field.db = self.db
         field.name = '{0}s'.format(self.tablename)
         field.to_table, field.tablename = self.tablename, self.to_table
@@ -298,7 +321,12 @@ class Model(object):
             columns=', '.join(columns),
             items=', '.join(values)
         )
-        self.__db__.execute(sql=sql, commit=True)
+        cursor = self.__db__.execute(sql=sql, commit=True)
+        self.id = cursor.lastrowid
+
+        for name, field in self.__refed_fields__.iteritems():
+            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyFieldBase):
+                field.instance_id = self.id
 
 
 class Sqlite(threading.local):
@@ -348,26 +376,6 @@ class Sqlite(threading.local):
             self.commit()
         return cursor
 
-    def execute_query_set(self, model, sql):
-        cursor = self.model.__db__.execute(sql)
-        descriptor = list(i[0] for i in cursor.description)
-        records = cursor.fetchall()
-        query_set = [self._make_instance(descriptor, record) for record in records]
-        return query_set
-
-    def _make_instance(self, descriptor, record):
-        # must handle empty case.
-        try:
-            instance = self.model(**dict(zip(descriptor, record)))
-        except TypeError:
-            return None
-
-        for name, field in instance.__refed_fields__.iteritems():
-            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyBaseField):
-                field.instance_id = instance.id
-
-        return instance
-
 
 class SelectQuery(object):
     """ select title, content from post where id = 1 and title = "my title";
@@ -389,11 +397,11 @@ class SelectQuery(object):
         )
 
     def all(self):
-        return self._execute(self.model, self.sql)
+        return self._execute(self.sql)
 
     def first(self):
         self.base_sql = '{0} limit 1;'.format(self.base_sql.rstrip(';'))
-        return self._execute(self.model, self.sql)[0]
+        return self._execute(self.sql)[0]
 
     def where(self, *args, **kwargs):
         where_list = []
@@ -448,6 +456,26 @@ class SelectQuery(object):
         self.base_sql = '{0} like "{1}";'.format(self.base_sql.rstrip(';'), pattern)
         return self
 
+    def _execute(self, sql):
+        cursor = self.model.__db__.execute(sql)
+        descriptor = list(i[0] for i in cursor.description)
+        records = cursor.fetchall()
+        query_set = [self._make_instance(descriptor, map(unicode_str, record)) for record in records]
+        return query_set
+
+    def _make_instance(self, descriptor, record):
+        # must handle empty case.
+        try:
+            instance = self.model(**dict(zip(descriptor, record)))
+        except TypeError:
+            return None
+
+        for name, field in instance.__refed_fields__.iteritems():
+            if isinstance(field, ForeignKeyReverseField) or isinstance(field, ManyToManyFieldBase):
+                field.instance_id = instance.id
+
+        return instance
+
 
 class UpdateQuery(object):
     def __init__(self, model, *args, **kwargs):
@@ -490,3 +518,7 @@ class DeleteQuery(object):
 
     def commit(self):
         return self.model.__db__.execute(sql=self.sql, commit=True)
+
+
+def unicode_str(s):
+    return s.encode(encoding_type) if isinstance(s, unicode) else s

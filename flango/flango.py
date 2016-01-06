@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Flango. A simple WSGI based webframework for learning.
+Flango: A simple WSGI based webframework for learning.
 
 Flango is a WSGI based webframework in pure Python, without any third-party dependency.
 flango include a simple router, which provide the request routing, a template engine

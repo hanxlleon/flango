@@ -1,4 +1,4 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 """
     flango.template
     ~~~~~~~~~~~~~~
@@ -174,7 +174,7 @@ class Template(object):
     `exec` also has a huge problem in security, so be careful
     and be serious, and I am very serious too.
     """
-    def __init__(self, source, path='', autoescape=True):
+    def __init__(self, source, path='', autoescape=False):
         if not source:
             raise ValueError('Invalid parameter')
 
