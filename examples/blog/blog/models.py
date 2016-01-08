@@ -24,7 +24,7 @@ class Post(db.Model):
     comments = database.ForeignKeyReverseField('comment')
 
     class Meta:
-        __tablename__ = 'post'
+        db_table = 'post'
 
     def __repr__(self):
         return '<Post {0}>'.format(self.title)

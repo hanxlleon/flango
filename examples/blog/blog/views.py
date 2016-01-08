@@ -4,10 +4,15 @@ from .models import Comment, Post, Tag
 from .renderer import md_renderer
 
 
+@app.route('/test')
+def test():
+    return app.render('base.html')
+
+
 @app.route('/')
 def index():
     posts = Post.select().all()
-    return app.render('index.html', posts=posts)
+    return app.render('index.html', posts=posts, md_renderer=md_renderer)
 
 
 def tag_filter(tags):

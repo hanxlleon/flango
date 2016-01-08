@@ -166,7 +166,7 @@ class Flango(object):
     def not_modified(self):
         response = Response('', code=304)
         # Don't need Content-Type here.
-        del response.headers['Content-Type']
+        # del response.headers['Content-Type']
         return response
 
     def redirect(self, location, code=302):

@@ -1,21 +1,18 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <link rel="stylesheet" href="{{ app.url_for('static', 'style.css') }}" />
-    <title>tag : {{ tag.name }}</title>
-</head>
-<body>
-    <h2 id="title">flango Blog.</h2>
+{% extends 'base.html' %}
+
+
+{% block title %}tag : {{ tag.name }}{% endblock %}
+
+{% block content %}
+    <h2 id="title">Flango Blog</h2>
     <div class="post-list">
         <ul>
             
             {% for post in tag.posts.all() %}
             <li><h4> <a href="{{ app.url_for(views.show_post, id=post.id) }}"> {{ post.title }} </a></h4>
-                <pre>{{ post.pub_date }}</pre>
+                <p>{{ post.pub_date }}</p>
             </li>
             {% endfor %}
         </ul>
     </div>
-</body>
-</html>
+{% endblock %}
