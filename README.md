@@ -22,8 +22,8 @@ Example
     app.run(DEBUG=True)
 
 [A Blog based Flango](https://github.com/hziling/flango/tree/master/examples/blog)
-![image](https://github.com/hziling/flango/tree/master/examples/blog/example_images/1.jpg)
-![image](https://github.com/hziling/flango/tree/master/examples/blog/example_images/2.jpg)
+![image](https://github.com/hziling/flango/blob/master/examples/blog/example_images/1.jpg)
+![image](https://github.com/hziling/flango/blob/master/examples/blog/example_images/2.jpg)
 Tests
 -----
     ..............................................................................................
