@@ -9,6 +9,7 @@
     <meta name="author" content="">
     <link rel="icon" href="{{ app.url_for('static', 'favicon.ico') }}">
     <link rel="stylesheet" href="{{ app.url_for('static', 'style.css') }}" />
+    <script src="{{ app.url_for('static', 'jquery-2.0.0.min.js') }}"></script>
 
       {% block static_header %}
       {% endblock %}
@@ -26,7 +27,7 @@
     <![endif]-->
   </head>
 
-  <body>
+  <body data-spy="scroll" data-target="spy-scroll-id">
 
     <nav class="navbar navbar-inverse navbar-fixed-top">
       <div class="container">
@@ -41,7 +42,7 @@
         </div>
         <div id="navbar" class="collapse navbar-collapse">
           <ul class="nav navbar-nav">
-            <li class="active"><a href="{{ app.url_for(views.index) }}">Home</a></li>
+            <li><a href="{{ app.url_for(views.index) }}">Home</a></li>
             <li><a href="{{ app.url_for(views.create_post) }}">New Blog</a></li>
           </ul>
         </div><!--/.nav-collapse -->
@@ -68,5 +69,19 @@
     {% block static_footer %}
     {% endblock %}
 
+    <script type="text/javascript">
+
+    function activeNavBar() {
+        var $link = $('#navbar a');
+        for (var i = 0; i < $link.length; i++) {
+            if ($link[i].href == location.href) {
+                $link.eq(i).parent().addClass('active');
+            }
+        }
+    }
+
+    activeNavBar();
+
+    </script>
   </body>
 </html>

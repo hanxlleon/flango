@@ -396,7 +396,7 @@ class SelectQuery(object):
         self.model = model
         self.base_sql = 'select {columns} from {tablename};'
 
-        query_args = list(*args) if list(*args) else ['*']
+        query_args = list(args) if list(args) else ['*']
         self.query = ', '.join([str(column) for column in query_args])
 
     @property
@@ -518,7 +518,7 @@ class DeleteQuery(object):
     def __init__(self, model, *args, **kwargs):
         self.model = model
         self.sql = 'delete from {0};'.format(self.model.__tablename__)
-        where_list = list(*args)
+        where_list = list(args)
         for k, v in kwargs.iteritems():
             where_list.append('{0}="{1}"'.format(k, v))
 

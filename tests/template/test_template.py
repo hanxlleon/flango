@@ -132,7 +132,7 @@ class BaseTest(unittest.TestCase):
         self.assertEqual(rendered, 'flango')
 
     def test_escape(self):
-       rendered = Template("{{ content }}").render(
+       rendered = Template("{{ content }}", autoescape=True).render(
            content="<p>hello escape</p>")
        self.assertEqual(rendered, '&lt;p&gt;hello escape&lt;/p&gt;')
 

@@ -6,7 +6,7 @@
 <div class="post-list">
     <ul class="list-unstyled">
         {% if not posts %}
-            <p><a href="{{ app.url_for(views.create_post) }}">创建博客。</a></p>
+            <p><a href="{{ app.url_for(views.create_post) }}">Create a new blog.</a></p>
         {% else %}
             {% for post in posts %}
 
@@ -18,9 +18,11 @@
                         <p>{{ md_renderer.render(post.content[:300]) }}......</p>
                         <p>
                         {% for tag in post.tags.all() %}
+                            Tags:
                             <a href="{{ app.url_for(views.show_tag, id=tag.id) }}">
                                 <button type="button" class="btn btn-default btn-xs">
-                                    {{ tag.name }}
+                                    <!--{{ tag.name }}-->
+                                    ORM
                                 </button>
                             </a>&nbsp;
                         {% endfor %}

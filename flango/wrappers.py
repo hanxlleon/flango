@@ -168,4 +168,4 @@ class Response(BaseObject):
         return self.headers['Content-Type']
 
     def set_content_type(self, value):
-        self.headers['Content-Type'] = value
+        self.content_type = self.headers['Content-Type'] = value
