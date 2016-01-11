@@ -22,7 +22,7 @@ Example
         return 'Hello {0}!'.format(name)
 
     app.run(DEBUG=True)
-##### [A Blog based Flango](https://github.com/hziling/flango/tree/master/examples/blog):
+##### [Blog](https://github.com/hziling/flango/tree/master/examples/blog):
 
 ![image](https://github.com/hziling/flango/blob/master/examples/blog/example_images/1.jpg)
 
