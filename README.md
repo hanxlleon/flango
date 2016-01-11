@@ -11,7 +11,7 @@ a ORM framework for sqlite3.
 
 Example
 -------
-+ HelloWorld
+# HelloWorld
 
     from flango import flango
 
@@ -22,7 +22,7 @@ Example
         return 'Hello {0}!'.format(name)
 
     app.run(DEBUG=True)
-+ [A Blog based Flango](https://github.com/hziling/flango/tree/master/examples/blog)
+# [A Blog based Flango](https://github.com/hziling/flango/tree/master/examples/blog)
 
 ![image](https://github.com/hziling/flango/blob/master/examples/blog/example_images/1.jpg)
 
